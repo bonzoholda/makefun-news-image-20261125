@@ -1,312 +1,262 @@
 #!/usr/bin/env python3
-"""Draw the front page for the make.fun news-image-20261125 entry.
+"""Draw the front page of 'The World Today' for Wednesday 25 November 2026.
 
-One image, 1024x1024 PNG, summing up Wednesday 25 November 2026 in the
-style of a newspaper front page: masthead, one lead story (Houthi drone
-strike on Riyadh's PIF Tower) with a large drawn visual, and four
-secondary stories with small drawn icons. All five stories and every
-fact below were verified against news sources on 25 Nov 2026 (see
-../../cuan-team/research/news-image-20261125-story-lock.md).
-
-Deterministic: no randomness, no timestamps, no network. Running this
-script twice produces byte-identical output.
+A one-page newspaper front page, drawn entirely with PIL primitives:
+masthead, a lead story about the Houthi drone strike on Riyadh's PIF
+Tower, and four secondary stories (Sparta II, Huawei, the CIA/ODNI
+breach, Giuliani's Medal of Freedom). No photos, no stock art, no
+network access. The output is deterministic: running this script twice
+produces byte-identical PNG files.
 """
 
+import hashlib
 import math
-import os
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1024, 1024
-PAPER = (250, 246, 236)      # warm newsprint
-INK = (17, 17, 17)
-RED = (179, 38, 30)
-GRAY = (90, 90, 90)
-BLUE = (28, 68, 110)
-TEAL = (31, 120, 110)
-GREEN = (27, 120, 60)
-GOLD = (176, 132, 30)
-LIGHT = (238, 232, 218)
+PAPER = (247, 243, 232)
+INK = (24, 24, 24)
+RED = (164, 30, 34)
+GRAY = (96, 96, 92)
+GOLD = (178, 142, 60)
+BLUE = (36, 82, 128)
+LIGHT = (231, 225, 211)
 
-FONT_DIR = "/usr/share/fonts/truetype/dejavu"
-SERIF = os.path.join(FONT_DIR, "DejaVuSerif.ttf")
-SERIF_B = os.path.join(FONT_DIR, "DejaVuSerif-Bold.ttf")
-SANS = os.path.join(FONT_DIR, "DejaVuSans.ttf")
-SANS_B = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+FONT_DIR = Path("/usr/share/fonts/truetype/dejavu")
+SERIF = FONT_DIR / "DejaVuSerif.ttf"
+SERIF_B = FONT_DIR / "DejaVuSerif-Bold.ttf"
+SANS = FONT_DIR / "DejaVuSans.ttf"
+SANS_B = FONT_DIR / "DejaVuSans-Bold.ttf"
 
 
-def font(path, size):
-    return ImageFont.truetype(path, size)
+def load(path, size):
+    return ImageFont.truetype(str(path), size)
 
 
-def wrap(draw, text, fnt, max_w):
-    """Greedy word wrap; returns list of lines that fit max_w."""
-    words = text.split()
-    lines, cur = [], ""
-    for w in words:
-        trial = (cur + " " + w).strip()
-        if draw.textlength(trial, font=fnt) <= max_w:
-            cur = trial
+def fit_size(draw, lines, path, start_size, max_width):
+    """Largest font size (<= start_size) at which every line fits max_width."""
+    size = start_size
+    while size > 10:
+        fnt = ImageFont.truetype(str(path), size)
+        if all(draw.textlength(line, font=fnt) <= max_width for line in lines):
+            return size
+        size -= 1
+    return size
+
+
+def wrap(draw, text, fnt, max_width):
+    """Split text into lines that fit max_width, measured with fnt."""
+    lines = []
+    current = ""
+    for word in text.split():
+        trial = f"{current} {word}".strip()
+        if draw.textlength(trial, font=fnt) <= max_width:
+            current = trial
         else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     return lines
 
 
-def draw_lines(draw, lines, x, y, fnt, fill=INK, leading=None):
-    if leading is None:
-        leading = int(fnt.size * 1.28)
+def put_lines(draw, lines, x, y, fnt, fill, leading):
     for line in lines:
         draw.text((x, y), line, font=fnt, fill=fill)
         y += leading
     return y
 
 
-def rule(draw, x0, y, x1, width=2, fill=INK):
-    draw.line([(x0, y), (x1, y)], fill=fill, width=width)
-
-
-def star_points(cx, cy, r_out, r_in, n=5, rot=-90):
+def star(cx, cy, r_out, r_in, points=5):
     pts = []
-    for i in range(2 * n):
+    for i in range(points * 2):
         r = r_out if i % 2 == 0 else r_in
-        a = math.radians(rot + i * 180 / n)
-        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+        angle = -math.pi / 2 + i * math.pi / points
+        pts.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
     return pts
 
 
-def draw_tower(draw, cx, cy, w, h):
-    """The PIF Tower: a tall twisting skyscraper, hit near the top.
-
-    A dark tower with a twisted top, pale window bands, a small drone
-    above it and a red impact burst on its upper floors.
-    """
-    top_w, bot_w = w * 0.62, w
-    top_y, bot_y = cy - h / 2, cy + h / 2
-    # twisted body: top shifted right, base shifted left
-    draw.polygon([
-        (cx - top_w / 2 + w * 0.16, top_y),
-        (cx + top_w / 2 + w * 0.16, top_y),
-        (cx + bot_w / 2 - w * 0.10, bot_y),
-        (cx - bot_w / 2 - w * 0.10, bot_y),
-    ], fill=INK)
-    # pale window bands
-    for i in range(1, 7):
-        yy = top_y + (bot_y - top_y) * i / 7
-        frac = i / 7
-        half = (top_w / 2 + (bot_w - top_w) / 2 * frac)
-        xoff = w * 0.16 - (w * 0.26) * frac
-        draw.line([(cx - half + xoff, yy), (cx + half + xoff, yy)],
-                  fill=(150, 150, 150), width=2)
-    # impact burst near the top
-    bx, by = cx + w * 0.28, top_y + h * 0.22
-    for ang in range(0, 360, 30):
-        a = math.radians(ang)
-        r1, r2 = w * 0.06, w * 0.17
-        draw.line([(bx + r1 * math.cos(a), by + r1 * math.sin(a)),
-                   (bx + r2 * math.cos(a), by + r2 * math.sin(a))],
-                  fill=RED, width=4)
-    draw.ellipse([bx - w * 0.06, by - w * 0.06, bx + w * 0.06, by + w * 0.06],
-                 fill=RED)
-    # drone above the tower
-    dx, dy = cx + w * 0.42, top_y - h * 0.10
-    draw.ellipse([dx - w * 0.07, dy - w * 0.07, dx + w * 0.07, dy + w * 0.07],
-                 fill=INK)
-    for sx in (-1, 1):
-        draw.line([(dx + sx * w * 0.10, dy), (dx + sx * w * 0.24, dy)],
-                  fill=INK, width=4)
+def burst(cx, cy, r_out, r_in, spikes=8):
+    pts = []
+    for i in range(spikes * 2):
+        r = r_out if i % 2 == 0 else r_in
+        angle = -math.pi / 2 + i * math.pi / spikes
+        pts.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
+    return pts
 
 
-def icon_cargo(draw, x, y, s):
-    """Cargo ship (Sparta II) with containers and a drone above."""
-    # drone
-    draw.ellipse([x + s * 0.62, y + s * 0.04, x + s * 0.76, y + s * 0.18], fill=INK)
-    for dx in (0.50, 0.82):
-        draw.line([(x + s * dx, y + s * 0.11), (x + s * dx + s * 0.13, y + s * 0.11)],
-                  fill=INK, width=4)
-    # container stacks
-    draw.rectangle([x + s * 0.16, y + s * 0.30, x + s * 0.38, y + s * 0.44], fill=BLUE)
-    draw.rectangle([x + s * 0.16, y + s * 0.45, x + s * 0.38, y + s * 0.52], fill=TEAL)
-    draw.rectangle([x + s * 0.40, y + s * 0.38, x + s * 0.60, y + s * 0.52], fill=TEAL)
-    draw.rectangle([x + s * 0.62, y + s * 0.38, x + s * 0.76, y + s * 0.52], fill=GOLD)
-    # bridge
-    draw.rectangle([x + s * 0.78, y + s * 0.30, x + s * 0.88, y + s * 0.52], fill=INK)
-    # hull
-    draw.polygon([(x + s * 0.06, y + s * 0.52), (x + s * 0.94, y + s * 0.52),
-                  (x + s * 0.80, y + s * 0.72), (x + s * 0.20, y + s * 0.72)],
-                 fill=INK)
-    # waves
-    for wy in (0.80, 0.90):
-        draw.arc([x + s * 0.05, y + s * wy, x + s * 0.48, y + s * (wy + 0.14)],
-                 180, 360, fill=BLUE, width=3)
-        draw.arc([x + s * 0.52, y + s * wy, x + s * 0.95, y + s * (wy + 0.14)],
-                 180, 360, fill=BLUE, width=3)
+def draw_tower(draw, x0, y0, x1, y1):
+    """A dark tower with lit windows, an antenna, a drone and an impact burst."""
+    draw.rectangle([x0, y0, x1, y1], fill=INK)
+    cx = (x0 + x1) // 2
+    draw.line([cx, y0, cx, y0 - 30], fill=INK, width=5)
+    draw.ellipse([cx - 6, y0 - 38, cx + 6, y0 - 26], fill=RED)
+    for row in range(8):
+        wy = y0 + 30 + row * 34
+        for col in range(4):
+            wx = x0 + 28 + col * 52
+            draw.rectangle([wx, wy, wx + 20, wy + 13], fill=LIGHT)
+    # drone hovering in the empty band above the tower, left of the antenna
+    dx, dy = x0 + 70, y0 - 18
+    draw.ellipse([dx - 9, dy - 9, dx + 9, dy + 9], fill=INK)
+    draw.line([dx - 32, dy, dx - 10, dy], fill=INK, width=4)
+    draw.line([dx + 10, dy, dx + 32, dy], fill=INK, width=4)
+    draw.ellipse([dx - 42, dy - 5, dx - 24, dy + 5], fill=INK)
+    draw.ellipse([dx + 24, dy - 5, dx + 42, dy + 5], fill=INK)
+    # red impact burst on the tower face
+    bx, by = x0 + 190, y0 + 96
+    draw.polygon(burst(bx, by, 30, 13), fill=RED)
+    draw.ellipse([bx - 7, by - 7, bx + 7, by + 7], fill=(255, 255, 255))
 
 
-def icon_gavel(draw, x, y, s):
-    """Judge's gavel over a sound block, with a 10/12 verdict badge."""
-    # sound block
-    draw.rectangle([x + s * 0.18, y + s * 0.78, x + s * 0.62, y + s * 0.88], fill=INK)
-    # handle (diagonal)
-    draw.line([(x + s * 0.30, y + s * 0.74), (x + s * 0.62, y + s * 0.34)],
-              fill=INK, width=9)
-    # gavel head
-    draw.rectangle([x + s * 0.52, y + s * 0.20, x + s * 0.82, y + s * 0.40],
-                   fill=INK)
-    draw.rectangle([x + s * 0.48, y + s * 0.16, x + s * 0.56, y + s * 0.44],
-                   fill=INK)
-    draw.rectangle([x + s * 0.78, y + s * 0.16, x + s * 0.86, y + s * 0.44],
-                   fill=INK)
-    # verdict badge: 10/12 (bottom-right, clear of the gavel head)
-    draw.ellipse([x + s * 0.68, y + s * 0.60, x + s * 0.99, y + s * 0.91],
-                 fill=RED, outline=PAPER, width=2)
-    f = font(SANS_B, int(s * 0.11))
-    label = "10/12"
-    tw = draw.textlength(label, font=f)
-    draw.text((x + s * 0.835 - tw / 2, y + s * 0.695), label, font=f,
-              fill=(255, 255, 255))
+def draw_ship(draw, x, y):
+    """Cargo ship with containers and waves, inside an 88x88 box."""
+    draw.rectangle([x + 16, y + 30, x + 36, y + 56], fill=BLUE)
+    draw.rectangle([x + 40, y + 36, x + 60, y + 56], fill=RED)
+    draw.rectangle([x + 62, y + 26, x + 78, y + 56], fill=INK)
+    draw.polygon(
+        [(x + 6, y + 56), (x + 82, y + 56), (x + 74, y + 72), (x + 14, y + 72)],
+        fill=INK,
+    )
+    for wx in (x + 4, x + 32, x + 60):
+        draw.arc([wx, y + 76, wx + 26, y + 88], 0, 180, fill=BLUE, width=3)
 
 
-def icon_breach(draw, x, y, s):
-    """Padlock with a crack: the CIA/ODNI breach."""
-    # shackle
-    draw.arc([x + s * 0.30, y + s * 0.06, x + s * 0.70, y + s * 0.46],
-             180, 360, fill=INK, width=7)
-    # body
-    draw.rectangle([x + s * 0.20, y + s * 0.40, x + s * 0.80, y + s * 0.88],
-                   fill=INK)
-    # keyhole
-    draw.ellipse([x + s * 0.45, y + s * 0.52, x + s * 0.55, y + s * 0.62],
-                 fill=PAPER)
-    draw.polygon([(x + s * 0.47, y + s * 0.60), (x + s * 0.53, y + s * 0.60),
-                  (x + s * 0.56, y + s * 0.74), (x + s * 0.44, y + s * 0.74)],
-                 fill=PAPER)
-    # red crack across the body
-    crack = [(x + s * 0.24, y + s * 0.44), (x + s * 0.38, y + s * 0.58),
-             (x + s * 0.30, y + s * 0.66), (x + s * 0.48, y + s * 0.76),
-             (x + s * 0.40, y + s * 0.86)]
-    draw.line(crack, fill=RED, width=4, joint="curve")
-    # radiating alarm lines
-    for ang in (200, 250, 290, 340):
-        a = math.radians(ang)
-        cx, cy = x + s * 0.50, y + s * 0.30
-        draw.line([(cx + s * 0.22 * math.cos(a), cy + s * 0.22 * math.sin(a)),
-                   (cx + s * 0.32 * math.cos(a), cy + s * 0.32 * math.sin(a))],
-                  fill=RED, width=3)
+def draw_scales(draw, x, y):
+    """Balance scales, inside an 88x88 box."""
+    draw.line([x + 14, y + 80, x + 74, y + 80], fill=INK, width=4)
+    draw.line([x + 44, y + 20, x + 44, y + 80], fill=INK, width=4)
+    draw.line([x + 16, y + 26, x + 72, y + 26], fill=INK, width=4)
+    draw.line([x + 16, y + 26, x + 8, y + 52], fill=INK, width=3)
+    draw.line([x + 16, y + 26, x + 24, y + 52], fill=INK, width=3)
+    draw.line([x + 72, y + 26, x + 64, y + 52], fill=INK, width=3)
+    draw.line([x + 72, y + 26, x + 80, y + 52], fill=INK, width=3)
+    draw.polygon([(x + 4, y + 52), (x + 28, y + 52), (x + 16, y + 64)], fill=INK)
+    draw.polygon([(x + 60, y + 52), (x + 84, y + 52), (x + 72, y + 64)], fill=INK)
 
 
-def icon_medal(draw, x, y, s):
-    """A medal on its ribbon: the Medal of Freedom."""
-    # ribbon (two bands)
-    draw.polygon([(x + s * 0.36, y + s * 0.02), (x + s * 0.48, y + s * 0.02),
-                  (x + s * 0.42, y + s * 0.42), (x + s * 0.30, y + s * 0.42)],
-                 fill=RED)
-    draw.polygon([(x + s * 0.52, y + s * 0.02), (x + s * 0.64, y + s * 0.02),
-                  (x + s * 0.70, y + s * 0.42), (x + s * 0.58, y + s * 0.42)],
-                 fill=BLUE)
-    # medal disc
-    cx, cy = x + s * 0.50, y + s * 0.66
-    draw.ellipse([cx - s * 0.26, cy - s * 0.26, cx + s * 0.26, cy + s * 0.26],
-                 fill=GOLD, outline=INK, width=2)
-    draw.polygon(star_points(cx, cy, s * 0.18, s * 0.08), fill=PAPER)
+def draw_lock(draw, x, y):
+    """Padlock with a red crack, inside an 88x88 box."""
+    draw.arc([x + 28, y + 8, x + 60, y + 44], 180, 360, fill=INK, width=6)
+    draw.rectangle([x + 18, y + 40, x + 70, y + 80], fill=INK)
+    draw.ellipse([x + 38, y + 50, x + 50, y + 62], fill=PAPER)
+    draw.polygon([(x + 41, y + 60), (x + 47, y + 60), (x + 44, y + 70)], fill=PAPER)
+    draw.line(
+        [(x + 24, y + 44), (x + 36, y + 54), (x + 30, y + 62), (x + 44, y + 74)],
+        fill=RED,
+        width=3,
+    )
 
 
-def secondary(draw, x, y, w, icon, kicker, headline, deck):
-    """One secondary story cell: icon left, text right."""
-    s = 120
-    icon(draw, x, y + 8, s)
-    tx = x + s + 16
-    tw = w - s - 16
-    f_kick = font(SANS_B, 17)
-    draw.text((tx, y + 4), kicker, font=f_kick, fill=RED)
-    f_head = font(SERIF_B, 26)
-    lines = wrap(draw, headline, f_head, tw)
-    y2 = draw_lines(draw, lines[:2], tx, y + 28, f_head, leading=31)
-    f_deck = font(SANS, 17)
-    lines = wrap(draw, deck, f_deck, tw)
-    draw_lines(draw, lines[:2], tx, y2 + 4, f_deck, fill=GRAY, leading=22)
+def draw_medal(draw, x, y):
+    """Medal on ribbons, inside an 88x88 box."""
+    draw.polygon([(x + 30, y + 6), (x + 44, y + 6), (x + 40, y + 34), (x + 28, y + 34)], fill=RED)
+    draw.polygon([(x + 44, y + 6), (x + 58, y + 6), (x + 60, y + 34), (x + 48, y + 34)], fill=BLUE)
+    draw.ellipse([x + 20, y + 30, x + 68, y + 78], fill=GOLD, outline=INK, width=2)
+    draw.polygon(star(x + 44, y + 54, 16, 7), fill=PAPER)
+
+
+def secondary(draw, x, y, kicker, headline, body, icon):
+    """One secondary story cell: icon on the left, text on the right."""
+    icon(draw, x, y)
+    tx = x + 104
+    tw = 344
+    draw.text((tx, y), kicker, font=load(SANS_B, 15), fill=RED)
+    hy = y + 22
+    lines = wrap(draw, headline, load(SERIF_B, 24), tw)
+    hy = put_lines(draw, lines, tx, hy, load(SERIF_B, 24), INK, 29)
+    by = hy + 6
+    blines = wrap(draw, body, load(SANS, 17), tw)
+    put_lines(draw, blines, tx, by, load(SANS, 17), INK, 22)
 
 
 def main():
     img = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(img)
-    MX = 40  # margin
-    RX = W - MX
+    m = 48
 
-    # ---- masthead ----
-    rule(d, MX, 26, RX, 3)
-    f_mast = font(SERIF_B, 82)
-    title = "THE WORLD TODAY"
-    tw = d.textlength(title, font=f_mast)
-    d.text(((W - tw) / 2, 36), title, font=f_mast, fill=INK)
-    rule(d, MX, 138, RX, 5)
-    rule(d, MX, 146, RX, 1)
-    f_date = font(SANS_B, 20)
-    d.text((MX, 158), "WEDNESDAY, 25 NOVEMBER 2026", font=f_date, fill=INK)
-    right = "WORLD NEWS  ·  ONE PAGE"
-    tw = d.textlength(right, font=f_date)
-    d.text((RX - tw, 158), right, font=f_date, fill=INK)
+    # top rules + masthead
+    d.line([(m, 26), (W - m, 26)], fill=INK, width=3)
+    d.line([(m, 33), (W - m, 33)], fill=INK, width=1)
+    mast_size = fit_size(d, ["THE WORLD TODAY"], SERIF_B, 92, W - 2 * m)
+    d.text((W // 2, 44), "THE WORLD TODAY", font=load(SERIF_B, mast_size), fill=INK, anchor="mt")
+    d.line([(m, 158), (W - m, 158)], fill=INK, width=2)
+    d.text((m, 170), "WEDNESDAY, 25 NOVEMBER 2026", font=load(SANS_B, 20), fill=INK)
+    d.text((W - m, 170), "FIVE STORIES · ONE PAGE", font=load(SANS_B, 20), fill=INK, anchor="ra")
+    d.line([(m, 202), (W - m, 202)], fill=INK, width=1)
 
-    # ---- lead story: Houthi drone hits Riyadh's PIF Tower ----
-    y = 196
-    f_kick = font(SANS_B, 20)
-    d.text((MX, y), "CONFLICT  —  RIYADH, SAUDI ARABIA", font=f_kick, fill=RED)
-    y += 30
-    f_head = font(SERIF_B, 60)
-    d.text((MX, y), "DRONE STRIKES", font=f_head, fill=INK)
-    y += 68
-    d.text((MX, y), "RIYADH TOWER", font=f_head, fill=INK)
-    y += 78
-    # left column: deck + body; right column: tower visual
-    text_w = 560
-    f_deck = font(SERIF, 25)
-    deck = ("A Houthi drone hit the kingdom's tallest tower — the "
-            "Public Investment Fund Tower in Riyadh — wounding 11 "
-            "in a second strike in under a week.")
-    y2 = draw_lines(d, wrap(d, deck, f_deck, text_w), MX, y, f_deck, leading=32)
-    f_body = font(SERIF, 19)
-    body = ("The coalition vowed a decisive response after the "
-            "attack on the King Abdullah Financial District.")
-    draw_lines(d, wrap(d, body, f_body, text_w), MX, y2 + 14, f_body,
-               fill=GRAY, leading=25)
-    draw_tower(d, 800, y + 108, 150, 228)
+    # lead kicker + three-line headline (left column)
+    d.text((m, 214), "CONFLICT — RIYADH, SAUDI ARABIA", font=load(SANS_B, 21), fill=RED)
+    head_lines = ["HOUTHI DRONE HITS", "RIYADH'S TALLEST", "TOWER"]
+    head_size = fit_size(d, head_lines, SERIF_B, 54, 592)
+    put_lines(d, head_lines, m, 246, load(SERIF_B, head_size), INK, int(head_size * 1.15))
 
-    # ---- divider ----
-    rule(d, MX, 600, RX, 3)
+    # lead deck (left column, under the headline)
+    deck = (
+        "A Houthi drone struck the Public Investment Fund Tower in Riyadh "
+        "on Tuesday — the second hit on the same tower in under a week. "
+        "Eleven people were wounded."
+    )
+    put_lines(d, wrap(d, deck, load(SERIF, 24), 592), m, 440, load(SERIF, 24), INK, 32)
 
-    # ---- secondary stories, 2 x 2 ----
-    cell_w = (W - 2 * MX - 24) // 2
-    cell_h = 158
-    gx, gy = MX, 624
-    secondary(d, gx, gy, cell_w, icon_cargo,
-              "CONFLICT — GULF OF FINLAND",
-              "Zelenskiy confirms Sparta II strike",
-              "Ukraine says the ship carried weapons; Norway urges caution.")
-    secondary(d, gx + cell_w + 24, gy, cell_w, icon_gavel,
-              "COURTS — NEW YORK",
-              "Huawei guilty on 10 of 12 counts",
-              "Fraud and trade-secret theft proven; racketeering charge fails.")
-    secondary(d, gx, gy + cell_h + 14, cell_w, icon_breach,
-              "SECURITY — WASHINGTON",
-              "CIA and ODNI hit by cyber breach",
-              "Unclassified data exposed; classified systems said untouched.")
-    secondary(d, gx + cell_w + 24, gy + cell_h + 14, cell_w, icon_medal,
-              "POLITICS — WASHINGTON",
-              "Trump gives Giuliani the Medal of Freedom",
-              "The 82-year-old is the third to get the top honor this term.")
+    # lead art: tower on the right, spanning the whole lead block
+    draw_tower(d, 690, 250, 950, 576)
 
-    # ---- footer ----
-    rule(d, MX, 972, RX, 1)
-    f_foot = font(SANS, 15)
-    foot = "THE WORLD TODAY  ·  ALL FIVE STORIES FROM WEDNESDAY 25 NOVEMBER 2026  ·  DRAWN ENTIRELY IN CODE"
-    tw = d.textlength(foot, font=f_foot)
-    d.text(((W - tw) / 2, 982), foot, font=f_foot, fill=GRAY)
+    # divider
+    d.line([(m, 596), (W - m, 596)], fill=INK, width=2)
 
-    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "entry.png")
-    img.save(out, format="PNG", optimize=True)
-    print("wrote", out, os.path.getsize(out), "bytes")
+    # four secondaries in a 2x2 grid
+    stories = [
+        (
+            "CONFLICT — GULF OF FINLAND",
+            "Zelenskiy confirms Sparta II strike",
+            "Kyiv says the ship carried weapons; one crew member was hurt — "
+            "the fourth Russian vessel hit since 11 November.",
+            draw_ship,
+        ),
+        (
+            "COURTS — NEW YORK",
+            "Huawei guilty on 10 of 12 counts",
+            "Fraud and trade-secret theft were proven; the racketeering "
+            "charge failed. Sentencing is set for September 2027.",
+            draw_scales,
+        ),
+        (
+            "SECURITY — WASHINGTON",
+            "CIA and ODNI hit by cyber breach",
+            "Some unclassified material was exposed; classified systems "
+            "were untouched, officials said. The breach has been fixed.",
+            draw_lock,
+        ),
+        (
+            "POLITICS — WASHINGTON",
+            "Giuliani gets Medal of Freedom",
+            "Trump placed the nation's highest civilian honor on the "
+            "82-year-old in a private Oval Office ceremony.",
+            draw_medal,
+        ),
+    ]
+    positions = [(48, 616), (528, 616), (48, 792), (528, 792)]
+    for (kx, ky), (kicker, headline, body, icon) in zip(positions, stories):
+        secondary(d, kx, ky, kicker, headline, body, icon)
+
+    # footer
+    d.line([(m, 968), (W - m, 968)], fill=INK, width=1)
+    d.text(
+        (W // 2, 980),
+        "THE WORLD TODAY · WEDNESDAY 25 NOVEMBER 2026 · FIVE STORIES, ONE PAGE",
+        font=load(SANS, 15),
+        fill=GRAY,
+        anchor="mt",
+    )
+
+    out = Path(__file__).resolve().parent.parent / "entry.png"
+    img.save(out, format="PNG")
+    data = out.read_bytes()
+    print(f"wrote {out} ({len(data)} bytes) md5={hashlib.md5(data).hexdigest()}")
 
 
 if __name__ == "__main__":
